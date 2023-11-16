@@ -1,0 +1,154 @@
+核心代码
+module fir_filter (
+  input wire clk,           // 时钟信号
+  input wire rst,           // 复位信号
+  input wire [15:0] x,      // 输入数据
+  output wire [15:0] y      // 输出数据
+);
+
+  // FIR滤波器系数
+  reg [15:0] h [0:7] = {16'h0000, 16'h0000, 16'h0000, 16'h0000, 16'h0000, 16'h0000, 16'h0000, 16'h0000};
+
+  // 状态寄存器
+  reg [15:0] x_history [0:7]; // 输入历史数据
+  reg [15:0] y_accumulator;   // 输出累加器
+
+  always @(posedge clk or posedge rst) begin
+    if (rst) begin
+      // 复位状态
+      y_accumulator <= 16'b0;
+      x_history <= 8'h0;
+    end else begin
+      // 移位输入历史
+      x_history[0] <= x;
+      x_history[1] <= x_history[0];
+      x_history[2] <= x_history[1];
+      x_history[3] <= x_history[2];
+      x_history[4] <= x_history[3];
+      x_history[5] <= x_history[4];
+      x_history[6] <= x_history[5];
+      x_history[7] <= x_history[6];
+
+      // FIR滤波
+      y_accumulator <= (h[0] * x_history[0]) +
+                       (h[1] * x_history[1]) +
+                       (h[2] * x_history[2]) +
+                       (h[3] * x_history[3]) +
+                       (h[4] * x_history[4]) +
+                       (h[5] * x_history[5]) +
+                       (h[6] * x_history[6]) +
+                       (h[7] * x_history[7]);
+
+      // 输出结果
+      y <= y_accumulator;
+    end
+  end
+
+endmodule
+
+module fir_dialog (
+  input wire clk,           // 时钟信号
+  input wire rst,           // 复位信号
+  input wire signed [15:0] x,  // 输入数据，16位带符号，8通道
+  output wire signed [15:0] y      // 输出数据，16位带符号
+);
+
+  // FIR滤波器系数
+  reg signed [15:0] h [0:5] = {16'h8000, 16'h8000, 16'hc001, 16'hc001, 16'hc001, 16'hc001};
+ 
+
+  // 状态寄存器
+  reg signed [15:0] x_history [0:7][0:5]; // 输入历史数据，8通道，6个历史值
+  reg signed [15:0] y_accumulator;   // 输出累加器
+
+  always @(posedge clk or posedge rst) begin
+    if (rst) begin
+      // 复位状态
+      y_accumulator <= 16'b0;
+      x_history <= 6'h0;
+    end else begin
+      // 移位输入历史
+      for (integer i = 5; i > 0; i = i - 1) begin
+        x_history[0][i] <= x[0][i-1];
+        x_history[1][i] <= x[1][i-1];
+        x_history[2][i] <= x[2][i-1];
+        x_history[3][i] <= x[3][i-1];
+        x_history[4][i] <= x[4][i-1];
+        x_history[5][i] <= x[5][i-1];
+        x_history[6][i] <= x[6][i-1];
+        x_history[7][i] <= x[7][i-1];
+      end
+
+      // 更新 FIR 滤波
+      y_accumulator <= (h[0] * x_history[0][0]) +
+                       (h[1] * x_history[0][1]) +
+                       (h[2] * x_history[0][2]) +
+                       (h[3] * x_history[0][3]) +
+                       (h[4] * x_history[0][4]) +
+                       (h[5] * x_history[0][5]);
+
+      // 输出结果
+      y <= y_accumulator;
+    end
+  end
+
+endmodule
+
+module PID_Controller (
+  input wire clk,          // 时钟信号
+  input wire rst_n,        // 复位信号，低电平有效
+  input wire [15:0] mask,  // 输入信号
+  input wire [15:0] link,  // 反馈信号
+  output wire [15:0] pid_output // PID控制器输出
+);
+
+  // PID参数
+  parameter integer P = 60;  // 比例项
+  parameter integer I = 3;   // 积分项
+  parameter integer D = 3;   // 倒数项
+
+  // 滤波导数参数
+  parameter integer alpha = 8'b01111111; // 滤波系数，可以根据实际需求调整
+
+  // 状态寄存器
+  reg [15:0] integral;
+  reg [15:0] prev_error;
+  reg [15:0] derivative;
+  reg [15:0] filtered_derivative;
+
+  // 初始化
+  initial begin
+    integral <= 16'h0000;
+    prev_error <= 16'h0000;
+    derivative <= 16'h0000;
+    filtered_derivative <= 16'h0000;
+  end
+
+  // PID控制逻辑
+  always @(posedge clk or posedge rst_n) begin
+    if (~rst_n) begin
+      // 外部复位时清零
+      integral <= 16'h0000;
+      prev_error <= 16'h0000;
+      derivative <= 16'h0000;
+      filtered_derivative <= 16'h0000;
+    end else begin
+      // 计算误差
+      reg [15:0] error = mask - link;
+
+      // 计算积分项
+      integral <= integral + error;
+
+      // 计算滤波导数
+      derivative <= error - prev_error;
+      filtered_derivative <= (alpha * derivative) + ((256 - alpha) * filtered_derivative) / 256;
+
+      // 计算PID输出
+      pid_output <= P * error + I * integral + D * filtered_derivative;
+
+      // 更新先前误差
+      prev_error <= error;
+    end
+  end
+endmodule
+
